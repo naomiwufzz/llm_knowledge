@@ -101,6 +101,48 @@ class MultiHeadAttention(nn.Module):
         context = context.transpose(1, 2).contiguous().view(batch_size, -1, self.enbed_size) # context: [batch_size x len_q x n_heads * d_v]
         context = self.linear(context)
         return context, attn # output: [batch_size x len_q x d_model]
+# 简洁版
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, num_heads):
+        super().__init__()
+        assert d_model % num_heads == 0
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
+
+        self.w_q = nn.Linear(d_model, d_model)
+        self.w_k = nn.Linear(d_model, d_model)
+        self.w_v = nn.Linear(d_model, d_model)
+        self.w_o = nn.Linear(d_model, d_model)
+
+    def forward(self, q, k, v, mask=None):
+        B = q.size(0)
+
+        Q = self.w_q(q)
+        K = self.w_k(k)
+        V = self.w_v(v)
+
+        Q = Q.view(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        K = K.view(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        V = V.view(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
+
+        scores = Q @ K.transpose(-2, -1)
+        scores = scores / math.sqrt(self.head_dim)
+
+        if mask is not None:
+            mask = mask.unsqueeze(1)  # [B, 1, len_q, len_k]，靠 broadcast 到每个 head
+            scores = scores.masked_fill(mask == 0, float("-inf"))
+
+        attn = torch.softmax(scores, dim=-1)
+        context = attn @ V
+
+        context = context.transpose(1, 2).contiguous()
+        context = context.view(B, -1, self.d_model)
+
+        output = self.w_o(context)
+        return output, attn
+
 
 if __name__ == "__main__":
     batch_size = 2
